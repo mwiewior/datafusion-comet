@@ -117,6 +117,9 @@ use jni::objects::GlobalRef;
 use num::{BigInt, ToPrimitive};
 use std::cmp::max;
 use std::{collections::HashMap, sync::Arc};
+use sequila_core::physical_planner::joins::interval_join::{parse_intervals, IntervalJoinExec};
+use sequila_core::session_context::Algorithm;
+
 
 // For clippy error on type_complexity.
 type ExecResult<T> = Result<T, ExecutionError>;
@@ -1071,6 +1074,33 @@ impl PhysicalPlanner {
                 )?);
 
                 Ok((scans, join))
+            }
+            OpStruct::IntervalJoin(join) => {
+                let (join_params, scans) = self.parse_join_parameters(
+                    inputs,
+                    children,
+                    &join.left_join_keys,
+                    &join.right_join_keys,
+                    join.join_type,
+                    &join.condition,
+                )?;
+
+                let filters = join_params.join_filter.as_ref().expect("must have filter");
+
+                let intervals = parse_intervals(filters).expect("must have intervals");
+                let interval_join = Arc::new(IntervalJoinExec::try_new(
+                    join_params.left,
+                    join_params.right,
+                    join_params.join_on,
+                    join_params.join_filter,
+                    intervals,
+                    &join_params.join_type,
+                    None, //FIXME:: check that!
+                    PartitionMode::Partitioned,
+                    false,
+                    Algorithm::Coitrees, //FIXME:: check that!
+                )?);
+                Ok((scans, interval_join as Arc<dyn ExecutionPlan>))
             }
             OpStruct::HashJoin(join) => {
                 let (join_params, scans) = self.parse_join_parameters(

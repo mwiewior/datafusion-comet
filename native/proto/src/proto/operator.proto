@@ -43,6 +43,8 @@ message Operator {
     SortMergeJoin sort_merge_join = 108;
     HashJoin hash_join = 109;
     Window window = 110;
+    IntervalJoin interval_join = 111;
+
   }
 }
 
@@ -109,6 +111,14 @@ message SortMergeJoin {
   JoinType join_type = 3;
   repeated spark.spark_expression.Expr sort_options = 4;
   optional spark.spark_expression.Expr condition = 5;
+}
+
+message IntervalJoin {
+  repeated spark.spark_expression.Expr left_join_keys = 1;
+  repeated spark.spark_expression.Expr right_join_keys = 2;
+  JoinType join_type = 3;
+  optional spark.spark_expression.Expr condition = 4;
+  BuildSide build_side = 5;
 }
 
 enum JoinType {
