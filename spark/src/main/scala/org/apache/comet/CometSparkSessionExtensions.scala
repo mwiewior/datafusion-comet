@@ -21,13 +21,16 @@ package org.apache.comet
 
 import java.nio.ByteOrder
 
+import org.biodatageeks.sequila.rangejoins.methods.IntervalTree.IntervalTreeJoinOptimChromosome
+
 import org.apache.spark.SparkConf
 import org.apache.spark.internal.Logging
 import org.apache.spark.network.util.ByteUnit
 import org.apache.spark.sql.{SparkSession, SparkSessionExtensions}
 import org.apache.spark.sql.catalyst.expressions.{Attribute, Divide, DoubleLiteral, EqualNullSafe, EqualTo, Expression, FloatLiteral, GreaterThan, GreaterThanOrEqual, KnownFloatingPointNormalized, LessThan, LessThanOrEqual, NamedExpression, PlanExpression, Remainder}
 import org.apache.spark.sql.catalyst.expressions.aggregate.{Final, Partial}
-import org.apache.spark.sql.catalyst.optimizer.NormalizeNaNAndZero
+import org.apache.spark.sql.catalyst.optimizer.{BuildLeft, NormalizeNaNAndZero}
+import org.apache.spark.sql.catalyst.plans.physical.IdentityBroadcastMode
 import org.apache.spark.sql.catalyst.rules.Rule
 import org.apache.spark.sql.catalyst.trees.TreeNode
 import org.apache.spark.sql.catalyst.util.MetadataColumnHelper
@@ -538,6 +541,33 @@ class CometSparkSessionExtensions
               s"${explainChildNotNative(op)}")
           op
 
+        case op: IntervalTreeJoinOptimChromosome if op.children.forall(isCometNative) =>
+          val newOp = transform1(op)
+          newOp match {
+            case Some(nativeOp) =>
+              val b = BroadcastExchangeExec(IdentityBroadcastMode, op.right)
+              val a = QueryPlanSerde.operator2Proto(b) match {
+                case Some(nativeOp) =>
+                  val cometOp = CometBroadcastExchangeExec(b, b.output, b.child)
+                  CometSinkPlaceHolder(nativeOp, b, cometOp)
+                case None => b
+              }
+              CometIntervalJoinExec(
+                nativeOp,
+                op,
+                op.output,
+                op.outputOrdering,
+                Seq(op.condition(4)),
+                Seq(op.condition(5)),
+                op.joinType,
+                op.conditionExact,
+                BuildLeft, // FIXME: hardcode
+                op.left,
+                a,
+                SerializedPlan(None))
+            case None =>
+              op
+          }
         case op: BroadcastHashJoinExec
             if CometConf.COMET_EXEC_BROADCAST_HASH_JOIN_ENABLED.get(conf) &&
               op.children.forall(isCometNative(_)) =>

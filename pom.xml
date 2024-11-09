@@ -54,6 +54,8 @@ under the License.
     <scalatest-maven-plugin.version>2.0.2</scalatest-maven-plugin.version>
     <spark.version>3.4.3</spark.version>
     <spark.version.short>3.4</spark.version.short>
+    <sequila.version>1.3.6</sequila.version>
+    <sequila.version.short>1.3</sequila.version.short>
     <spark.maven.scope>provided</spark.maven.scope>
     <protobuf.version>3.19.6</protobuf.version>
     <parquet.version>1.13.1</parquet.version>

@@ -115,11 +115,10 @@ use datafusion_physical_expr::LexOrdering;
 use itertools::Itertools;
 use jni::objects::GlobalRef;
 use num::{BigInt, ToPrimitive};
-use std::cmp::max;
-use std::{collections::HashMap, sync::Arc};
 use sequila_core::physical_planner::joins::interval_join::{parse_intervals, IntervalJoinExec};
 use sequila_core::session_context::Algorithm;
-
+use std::cmp::max;
+use std::{collections::HashMap, sync::Arc};
 
 // For clippy error on type_complexity.
 type ExecResult<T> = Result<T, ExecutionError>;

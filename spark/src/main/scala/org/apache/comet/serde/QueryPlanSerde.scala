@@ -20,7 +20,6 @@
 package org.apache.comet.serde
 
 import scala.collection.JavaConverters._
-
 import org.apache.spark.internal.Logging
 import org.apache.spark.sql.catalyst.expressions._
 import org.apache.spark.sql.catalyst.expressions.aggregate.{AggregateExpression, Average, BitAndAgg, BitOrAgg, BitXorAgg, BloomFilterAggregate, Complete, Corr, Count, CovPopulation, CovSample, Final, First, Last, Max, Min, Partial, StddevPop, StddevSamp, Sum, VariancePop, VarianceSamp}
@@ -41,15 +40,15 @@ import org.apache.spark.sql.execution.window.WindowExec
 import org.apache.spark.sql.internal.SQLConf
 import org.apache.spark.sql.types._
 import org.apache.spark.unsafe.types.UTF8String
-
 import org.apache.comet.CometConf
 import org.apache.comet.CometSparkSessionExtensions.{isCometScan, isSpark34Plus, withInfo}
 import org.apache.comet.expressions.{CometCast, CometEvalMode, Compatible, Incompatible, RegExp, Unsupported}
-import org.apache.comet.serde.ExprOuterClass.{AggExpr, DataType => ProtoDataType, Expr, ScalarFunc}
+import org.apache.comet.serde.ExprOuterClass.{AggExpr, Expr, ScalarFunc, DataType => ProtoDataType}
 import org.apache.comet.serde.ExprOuterClass.DataType.{DataTypeInfo, DecimalInfo, ListInfo, MapInfo, StructInfo}
-import org.apache.comet.serde.OperatorOuterClass.{AggregateMode => CometAggregateMode, BuildSide, JoinType, Operator}
+import org.apache.comet.serde.OperatorOuterClass.{BuildSide, JoinType, Operator, AggregateMode => CometAggregateMode}
 import org.apache.comet.shims.CometExprShim
 import org.apache.comet.shims.ShimQueryPlanSerde
+import org.biodatageeks.sequila.rangejoins.methods.IntervalTree.IntervalTreeJoinOptimChromosome
 
 /**
  * An utility object for query plan and expression serialization.
@@ -2714,7 +2713,48 @@ object QueryPlanSerde extends Logging with ShimQueryPlanSerde with CometExprShim
             None
           }
         }
+      case join: IntervalTreeJoinOptimChromosome =>
+        val condition = join.conditionExact.map { cond =>
+          val condProto = exprToProto(cond, join.left.output ++ join.right.output)
+          if (condProto.isEmpty) {
+            withInfo(join, cond)
+            return None
+          }
+          condProto.get
+        }
 
+        val joinType = join.joinType match {
+          case Inner => JoinType.Inner
+          case LeftOuter => JoinType.LeftOuter
+          case RightOuter => JoinType.RightOuter
+          case FullOuter => JoinType.FullOuter
+          case LeftSemi => JoinType.LeftSemi
+          case LeftAnti => JoinType.LeftAnti
+          case _ =>
+            // Spark doesn't support other join types
+            withInfo(join, s"Unsupported join type ${join.joinType}")
+            return None
+        }
+
+        val leftKeys = List(join.condition(4)).map(exprToProto(_, join.left.output))
+        val rightKeys = List(join.condition(5)).map(exprToProto(_, join.right.output))
+
+        if (leftKeys.forall(_.isDefined) &&
+          rightKeys.forall(_.isDefined) &&
+          childOp.nonEmpty) {
+          val joinBuilder = OperatorOuterClass.IntervalJoin
+            .newBuilder()
+            .setJoinType(joinType)
+            .addAllLeftJoinKeys(leftKeys.map(_.get).asJava)
+            .addAllRightJoinKeys(rightKeys.map(_.get).asJava)
+            .setBuildSide(BuildSide.BuildLeft)
+          condition.foreach(joinBuilder.setCondition)
+          Some(result.setIntervalJoin(joinBuilder).build())
+        } else {
+          val allExprs: Seq[Expression] = join.buildKeys ++ join.streamedKeys
+          withInfo(join, allExprs: _*)
+          None
+        }
       case join: HashJoin =>
         // `HashJoin` has only two implementations in Spark, but we check the type of the join to
         // make sure we are handling the correct join type.
