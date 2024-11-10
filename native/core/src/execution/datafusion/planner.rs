@@ -1087,9 +1087,11 @@ impl PhysicalPlanner {
                 let filters = join_params.join_filter.as_ref().expect("must have filter");
 
                 let intervals = parse_intervals(filters).expect("must have intervals");
+                let left = Self::wrap_in_copy_exec(join_params.left);
+                let right = Self::wrap_in_copy_exec(join_params.right);
                 let interval_join = Arc::new(IntervalJoinExec::try_new(
-                    join_params.left,
-                    join_params.right,
+                    left,
+                    right,
                     join_params.join_on,
                     join_params.join_filter,
                     intervals,

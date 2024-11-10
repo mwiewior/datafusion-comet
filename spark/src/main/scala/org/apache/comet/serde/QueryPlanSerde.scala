@@ -20,6 +20,9 @@
 package org.apache.comet.serde
 
 import scala.collection.JavaConverters._
+
+import org.biodatageeks.sequila.rangejoins.methods.IntervalTree.IntervalTreeJoinOptimChromosome
+
 import org.apache.spark.internal.Logging
 import org.apache.spark.sql.catalyst.expressions._
 import org.apache.spark.sql.catalyst.expressions.aggregate.{AggregateExpression, Average, BitAndAgg, BitOrAgg, BitXorAgg, BloomFilterAggregate, Complete, Corr, Count, CovPopulation, CovSample, Final, First, Last, Max, Min, Partial, StddevPop, StddevSamp, Sum, VariancePop, VarianceSamp}
@@ -40,15 +43,15 @@ import org.apache.spark.sql.execution.window.WindowExec
 import org.apache.spark.sql.internal.SQLConf
 import org.apache.spark.sql.types._
 import org.apache.spark.unsafe.types.UTF8String
+
 import org.apache.comet.CometConf
 import org.apache.comet.CometSparkSessionExtensions.{isCometScan, isSpark34Plus, withInfo}
 import org.apache.comet.expressions.{CometCast, CometEvalMode, Compatible, Incompatible, RegExp, Unsupported}
-import org.apache.comet.serde.ExprOuterClass.{AggExpr, Expr, ScalarFunc, DataType => ProtoDataType}
+import org.apache.comet.serde.ExprOuterClass.{AggExpr, DataType => ProtoDataType, Expr, ScalarFunc}
 import org.apache.comet.serde.ExprOuterClass.DataType.{DataTypeInfo, DecimalInfo, ListInfo, MapInfo, StructInfo}
-import org.apache.comet.serde.OperatorOuterClass.{BuildSide, JoinType, Operator, AggregateMode => CometAggregateMode}
+import org.apache.comet.serde.OperatorOuterClass.{AggregateMode => CometAggregateMode, BuildSide, JoinType, Operator}
 import org.apache.comet.shims.CometExprShim
 import org.apache.comet.shims.ShimQueryPlanSerde
-import org.biodatageeks.sequila.rangejoins.methods.IntervalTree.IntervalTreeJoinOptimChromosome
 
 /**
  * An utility object for query plan and expression serialization.

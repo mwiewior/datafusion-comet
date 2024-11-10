@@ -1096,6 +1096,7 @@ trait CometBroadcastHashLikeJoinExec extends CometBinaryExec with ShimCometBroad
   override def equals(obj: Any): Boolean = {
     obj match {
       case other: CometBroadcastHashJoinExec =>
+        this.output == other.output &&
         this.leftKeys == other.leftKeys &&
         this.rightKeys == other.rightKeys &&
         this.condition == other.condition &&
