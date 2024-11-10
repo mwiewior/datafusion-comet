@@ -981,3 +981,157 @@ case class CometSinkPlaceHolder(
 
   override def stringArgs: Iterator[Any] = Iterator(originalPlan.output, child)
 }
+
+trait CometBroadcastHashLikeJoinExec extends CometBinaryExec with ShimCometBroadcastHashJoinExec {
+
+  def nativeOp: Operator
+
+  def originalPlan: SparkPlan
+
+  def output: Seq[Attribute]
+
+  def outputOrdering: Seq[SortOrder]
+
+  def leftKeys: Seq[Expression]
+
+  def rightKeys: Seq[Expression]
+
+  def joinType: JoinType
+
+  def condition: Option[Expression]
+
+  def buildSide: BuildSide
+
+  def left: SparkPlan
+
+  def right: SparkPlan
+
+  def serializedPlanOpt: SerializedPlan
+
+  // The following logic of `outputPartitioning` is copied from Spark `BroadcastHashJoinExec`.
+  protected lazy val streamedPlan: SparkPlan = buildSide match {
+    case BuildLeft => right
+    case BuildRight => left
+  }
+
+  protected lazy val (buildKeys, streamedKeys) = {
+    require(
+      leftKeys.length == rightKeys.length &&
+        leftKeys
+          .map(_.dataType)
+          .zip(rightKeys.map(_.dataType))
+          .forall(types => types._1.sameType(types._2)),
+      "Join keys from two sides should have same length and types")
+    buildSide match {
+      case BuildLeft => (leftKeys, rightKeys)
+      case BuildRight => (rightKeys, leftKeys)
+    }
+  }
+
+  override lazy val outputPartitioning: Partitioning = {
+    joinType match {
+      case _: InnerLike if conf.broadcastHashJoinOutputPartitioningExpandLimit > 0 =>
+        streamedPlan.outputPartitioning match {
+          case h: HashPartitioning => expandOutputPartitioning(h)
+          case h: Expression if h.getClass.getName.contains("CoalescedHashPartitioning") =>
+            expandOutputPartitioning(h)
+          case c: PartitioningCollection => expandOutputPartitioning(c)
+          case other => other
+        }
+      case _ => streamedPlan.outputPartitioning
+    }
+  }
+
+  private def expandOutputPartitioning(
+      partitioning: PartitioningCollection): PartitioningCollection = {
+    PartitioningCollection(partitioning.partitionings.flatMap {
+      case h: HashPartitioning => expandOutputPartitioning(h).partitionings
+      case h: Expression if h.getClass.getName.contains("CoalescedHashPartitioning") =>
+        expandOutputPartitioning(h).partitionings
+      case c: PartitioningCollection => Seq(expandOutputPartitioning(c))
+      case other => Seq(other)
+    })
+  }
+  private def expandOutputPartitioning(
+      partitioning: Partitioning with Expression): PartitioningCollection = {
+    val maxNumCombinations = conf.broadcastHashJoinOutputPartitioningExpandLimit
+    var currentNumCombinations = 0
+
+    def generateExprCombinations(
+        current: Seq[Expression],
+        accumulated: Seq[Expression]): Seq[Seq[Expression]] = {
+      if (currentNumCombinations >= maxNumCombinations) {
+        Nil
+      } else if (current.isEmpty) {
+        currentNumCombinations += 1
+        Seq(accumulated)
+      } else {
+        val buildKeysOpt = streamedKeyToBuildKeyMapping.get(current.head.canonicalized)
+        generateExprCombinations(current.tail, accumulated :+ current.head) ++
+          buildKeysOpt
+            .map(_.flatMap(b => generateExprCombinations(current.tail, accumulated :+ b)))
+            .getOrElse(Nil)
+      }
+    }
+
+    PartitioningCollection(
+      generateExprCombinations(getHashPartitioningLikeExpressions(partitioning), Nil)
+        .map(exprs => partitioning.withNewChildren(exprs).asInstanceOf[Partitioning]))
+  }
+  private lazy val streamedKeyToBuildKeyMapping = {
+    val mapping = mutable.Map.empty[Expression, Seq[Expression]]
+    streamedKeys.zip(buildKeys).foreach { case (streamedKey, buildKey) =>
+      val key = streamedKey.canonicalized
+      mapping.get(key) match {
+        case Some(v) => mapping.put(key, v :+ buildKey)
+        case None => mapping.put(key, Seq(buildKey))
+      }
+    }
+    mapping.toMap
+  }
+
+  override def stringArgs: Iterator[Any] =
+    Iterator(leftKeys, rightKeys, joinType, condition, buildSide, left, right)
+
+  override def equals(obj: Any): Boolean = {
+    obj match {
+      case other: CometBroadcastHashJoinExec =>
+        this.output == other.output &&
+        this.leftKeys == other.leftKeys &&
+        this.rightKeys == other.rightKeys &&
+        this.condition == other.condition &&
+        this.buildSide == other.buildSide &&
+        this.left == other.left &&
+        this.right == other.right &&
+        this.serializedPlanOpt == other.serializedPlanOpt
+      case _ =>
+        false
+    }
+  }
+
+  override def hashCode(): Int =
+    Objects.hashCode(leftKeys, rightKeys, condition, buildSide, left, right)
+
+  override lazy val metrics: Map[String, SQLMetric] =
+    CometMetricNode.hashJoinMetrics(sparkContext)
+}
+
+case class CometIntervalJoinExec(
+    override val nativeOp: Operator,
+    override val originalPlan: SparkPlan,
+    override val output: Seq[Attribute],
+    override val outputOrdering: Seq[SortOrder],
+    leftKeys: Seq[Expression],
+    rightKeys: Seq[Expression],
+    joinType: JoinType,
+    condition: Option[Expression],
+    buildSide: BuildSide,
+    override val left: SparkPlan,
+    override val right: SparkPlan,
+    override val serializedPlanOpt: SerializedPlan)
+    extends CometBroadcastHashLikeJoinExec {
+
+  override def withNewChildrenInternal(newLeft: SparkPlan, newRight: SparkPlan): SparkPlan =
+    this.copy(left = newLeft, right = newRight)
+
+}
