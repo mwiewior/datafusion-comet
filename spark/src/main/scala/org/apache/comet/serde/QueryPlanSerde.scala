@@ -21,8 +21,6 @@ package org.apache.comet.serde
 
 import scala.collection.JavaConverters._
 
-import org.biodatageeks.sequila.rangejoins.methods.IntervalTree.IntervalTreeJoinOptimChromosome
-
 import org.apache.spark.internal.Logging
 import org.apache.spark.sql.catalyst.expressions._
 import org.apache.spark.sql.catalyst.expressions.aggregate.{AggregateExpression, Average, BitAndAgg, BitOrAgg, BitXorAgg, BloomFilterAggregate, Complete, Corr, Count, CovPopulation, CovSample, Final, First, Last, Max, Min, Partial, StddevPop, StddevSamp, Sum, VariancePop, VarianceSamp}
@@ -1551,19 +1549,19 @@ object QueryPlanSerde extends Logging with ShimQueryPlanSerde with CometExprShim
 
         // abs implementation is not correct
         // https://github.com/apache/datafusion-comet/issues/666
-//        case Abs(child, failOnErr) =>
-//          val childExpr = exprToProtoInternal(child, inputs)
-//          if (childExpr.isDefined) {
-//            val evalModeStr =
-//              if (failOnErr) ExprOuterClass.EvalMode.ANSI else ExprOuterClass.EvalMode.LEGACY
-//            val absBuilder = ExprOuterClass.Abs.newBuilder()
-//            absBuilder.setChild(childExpr.get)
-//            absBuilder.setEvalMode(evalModeStr)
-//            Some(Expr.newBuilder().setAbs(absBuilder).build())
-//          } else {
-//            withInfo(expr, child)
-//            None
-//          }
+        //        case Abs(child, failOnErr) =>
+        //          val childExpr = exprToProtoInternal(child, inputs)
+        //          if (childExpr.isDefined) {
+        //            val evalModeStr =
+        //          if (failOnErr) ExprOuterClass.EvalMode.ANSI else ExprOuterClass.EvalMode.LEGACY
+        //            val absBuilder = ExprOuterClass.Abs.newBuilder()
+        //            absBuilder.setChild(childExpr.get)
+        //            absBuilder.setEvalMode(evalModeStr)
+        //            Some(Expr.newBuilder().setAbs(absBuilder).build())
+        //          } else {
+        //            withInfo(expr, child)
+        //            None
+        //          }
 
         case Acos(child) =>
           val childExpr = exprToProtoInternal(child, inputs)
@@ -1704,10 +1702,10 @@ object QueryPlanSerde extends Logging with ShimQueryPlanSerde with CometExprShim
 
         // TODO enable once https://github.com/apache/datafusion/issues/11557 is fixed or
         // when we have a Spark-compatible version implemented in Comet
-//        case Signum(child) =>
-//          val childExpr = exprToProtoInternal(child, inputs)
-//          val optExpr = scalarExprToProto("signum", childExpr)
-//          optExprWithInfo(optExpr, expr, child)
+        //        case Signum(child) =>
+        //          val childExpr = exprToProtoInternal(child, inputs)
+        //          val optExpr = scalarExprToProto("signum", childExpr)
+        //          optExprWithInfo(optExpr, expr, child)
 
         case Sin(child) =>
           val childExpr = exprToProtoInternal(child, inputs)
@@ -2716,48 +2714,7 @@ object QueryPlanSerde extends Logging with ShimQueryPlanSerde with CometExprShim
             None
           }
         }
-      case join: IntervalTreeJoinOptimChromosome =>
-        val condition = join.conditionExact.map { cond =>
-          val condProto = exprToProto(cond, join.left.output ++ join.right.output)
-          if (condProto.isEmpty) {
-            withInfo(join, cond)
-            return None
-          }
-          condProto.get
-        }
 
-        val joinType = join.joinType match {
-          case Inner => JoinType.Inner
-          case LeftOuter => JoinType.LeftOuter
-          case RightOuter => JoinType.RightOuter
-          case FullOuter => JoinType.FullOuter
-          case LeftSemi => JoinType.LeftSemi
-          case LeftAnti => JoinType.LeftAnti
-          case _ =>
-            // Spark doesn't support other join types
-            withInfo(join, s"Unsupported join type ${join.joinType}")
-            return None
-        }
-
-        val leftKeys = List(join.condition(4)).map(exprToProto(_, join.left.output))
-        val rightKeys = List(join.condition(5)).map(exprToProto(_, join.right.output))
-
-        if (leftKeys.forall(_.isDefined) &&
-          rightKeys.forall(_.isDefined) &&
-          childOp.nonEmpty) {
-          val joinBuilder = OperatorOuterClass.IntervalJoin
-            .newBuilder()
-            .setJoinType(joinType)
-            .addAllLeftJoinKeys(leftKeys.map(_.get).asJava)
-            .addAllRightJoinKeys(rightKeys.map(_.get).asJava)
-            .setBuildSide(BuildSide.BuildLeft)
-          condition.foreach(joinBuilder.setCondition)
-          Some(result.setIntervalJoin(joinBuilder).build())
-        } else {
-          val allExprs: Seq[Expression] = join.buildKeys ++ join.streamedKeys
-          withInfo(join, allExprs: _*)
-          None
-        }
       case join: HashJoin =>
         // `HashJoin` has only two implementations in Spark, but we check the type of the join to
         // make sure we are handling the correct join type.
